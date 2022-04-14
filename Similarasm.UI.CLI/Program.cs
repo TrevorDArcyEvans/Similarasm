@@ -5,35 +5,36 @@ using Core;
 
 internal static class Program
 {
-  public static void Main(string[] args)
+  public static async Task Main(string[] args)
   {
-    var result = Parser.Default.ParseArguments<Options>(args)
-      .WithParsed(Run);
-    result.WithNotParsed(HandleParseError);
+    var result = await Parser.Default.ParseArguments<Options>(args)
+      .WithParsedAsync(Run);
+    await result.WithNotParsedAsync(HandleParseError);
   }
 
-  private static void Run(Options opt)
+  private static async Task Run(Options opt)
   {
-    // TODO   Run
     Console.WriteLine($"Analysing {opt.SolutionFilePath}");
+    var anal = await AnalyserFactory.CreateAnalyser(opt.SolutionFilePath);
+    await anal.Analyse();
   }
 
-  private static void HandleParseError(IEnumerable<Error> errs)
+  private static Task HandleParseError(IEnumerable<Error> errs)
   {
     if (errs.IsVersion())
     {
       Console.WriteLine($"Analyser {Analyser.Version}");
-      return;
+      return Task.CompletedTask;
     }
 
     if (errs.IsHelp())
     {
       HelpRequest();
-      return;
+      return Task.CompletedTask;
     }
 
     Console.WriteLine($"Parser Fail");
-    return;
+    return Task.CompletedTask;
   }
 
   private static void HelpRequest()
