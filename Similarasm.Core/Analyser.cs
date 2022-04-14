@@ -50,13 +50,13 @@ public sealed class Analyser : IDisposable
 
     foreach (var projectId in projectGraph.GetTopologicallySortedProjects())
     {
-      var projectCompilation = await Solution.GetProject(projectId).GetCompilationAsync();
+      var proj = Solution.GetProject(projectId);
+      var projComp = await proj.GetCompilationAsync();
       using var dll = new MemoryStream();
       using var pdb = new MemoryStream();
-      var result = projectCompilation.Emit(dll, pdb);
+      var result = projComp.Emit(dll, pdb);
       var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
 
-      var proj = Solution.GetProject(projectId);
       var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
       Console.WriteLine($"  {projName}");
 
