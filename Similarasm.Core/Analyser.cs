@@ -56,8 +56,8 @@ public sealed class Analyser : IDisposable
       var result = projectCompilation.Emit(dll, pdb);
       var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
 
-      var projPath = Solution.GetProject(projectId);
-      var projName = Path.GetFileNameWithoutExtension(projPath.FilePath);
+      var proj = Solution.GetProject(projectId);
+      var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
       Console.WriteLine($"  {projName}");
 
       const BindingFlags flags =
@@ -75,12 +75,12 @@ public sealed class Analyser : IDisposable
 
         foreach (var ci in type.GetConstructors(flags))
         {
-          ProcessMethod(ci, methodMap);
+          ProcessMethod(proj, ci, methodMap);
         }
 
         foreach (var mi in type.GetMethods(flags))
         {
-          ProcessMethod(mi, methodMap);
+          ProcessMethod(proj, mi, methodMap);
         }
       }
     }
@@ -113,7 +113,7 @@ public sealed class Analyser : IDisposable
     Solution = await workspace.OpenSolutionAsync(solnFilePath, progress, cancellationToken);
   }
 
-  private void ProcessMethod(MethodBase mb, Dictionary<string, string> methodMap)
+  private void ProcessMethod(Project proj, MethodBase mb, Dictionary<string, string> methodMap)
   {
     var il = mb.GetMethodBody()?.GetILAsByteArray();
     if (il is null)
@@ -122,7 +122,8 @@ public sealed class Analyser : IDisposable
     }
 
     var hash = string.Concat(_sha1.ComputeHash(il).Select(x => x.ToString("X2")));
-    var fullName = mb.DeclaringType.FullName + "." + mb.Name;
+    var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
+    var fullName = $"{projName}:{mb.DeclaringType.FullName}.{mb.Name}";
     if (!methodMap.ContainsKey(hash))
     {
       Console.WriteLine($"      {fullName}");
