@@ -4,13 +4,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.MSBuild;
+using System.Security.Cryptography;
 
 public sealed class Analyser
 {
@@ -39,6 +39,33 @@ public sealed class Analyser
   public async Task Analyse()
   {
     // TODO   Analyse
+    ProjectDependencyGraph projectGraph = Solution.GetProjectDependencyGraph();
+    Dictionary<string, Stream> assemblies = new Dictionary<string, Stream>();
+
+    foreach (ProjectId projectId in projectGraph.GetTopologicallySortedProjects())
+    {
+      var projectCompilation = await Solution.GetProject(projectId).GetCompilationAsync();
+      using var dll = new MemoryStream();
+      using var pdb = new MemoryStream();
+      var result = projectCompilation.Emit(dll, pdb);
+      var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
+
+      // TODO   create dictionary:
+      //    [hash-il-method] --> [fq-method-name]
+      var methodMap = new Dictionary<string, string>();
+
+      using var sha1 = SHA1.Create();
+      foreach (var type in assy.GetTypes())
+      {
+        foreach (var mi in type.GetMethods())
+        {
+          var il = mi.GetMethodBody()?.GetILAsByteArray();
+          var hash = string.Concat(sha1.ComputeHash(il).Select(x => x.ToString("X2")));
+          var name = mi.GetType().AssemblyQualifiedName;
+          methodMap.Add(hash, name);
+        }
+      }
+    }
   }
 
   private Analyser(string solnFilePath)
