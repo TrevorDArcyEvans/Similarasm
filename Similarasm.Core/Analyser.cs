@@ -12,11 +12,13 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using System.Security.Cryptography;
 
-public sealed class Analyser
+public sealed class Analyser : IDisposable
 {
   public static Version Version { get; } = new Version(0, 1);
 
   public Solution Solution { get; private set; }
+
+  private readonly SHA1 _sha1 = SHA1.Create();
 
   public static async Task<Analyser> Create(
     string solnFilePath,
@@ -46,7 +48,7 @@ public sealed class Analyser
     //    [hash-il-method] --> [fq-method-name]
     var methodMap = new Dictionary<string, string>();
 
-    foreach (ProjectId projectId in projectGraph.GetTopologicallySortedProjects())
+    foreach (var projectId in projectGraph.GetTopologicallySortedProjects())
     {
       var projectCompilation = await Solution.GetProject(projectId).GetCompilationAsync();
       using var dll = new MemoryStream();
@@ -67,46 +69,18 @@ public sealed class Analyser
         BindingFlags.Public |
         BindingFlags.NonPublic |
         BindingFlags.FlattenHierarchy;
-      using var sha1 = SHA1.Create();
       foreach (var type in assy.GetTypes())
       {
         Console.WriteLine($"    {type.Name}");
 
-        foreach(var ci in type.GetConstructors(flags))
+        foreach (var ci in type.GetConstructors(flags))
         {
-          var il = ci.GetMethodBody()?.GetILAsByteArray();
-          var hash = string.Concat(sha1.ComputeHash(il).Select(x => x.ToString("X2")));
-          var fullName = ci.DeclaringType.FullName + "." + ci.Name;
-          if (!methodMap.ContainsKey(hash))
-          {
-            Console.WriteLine($"      {fullName}");
-            methodMap.Add(hash, fullName);
-          }
-          else
-          {
-            Console.WriteLine($"      ***{fullName}");
-          }
+          ProcessMethod(ci, methodMap);
         }
 
         foreach (var mi in type.GetMethods(flags))
         {
-          var il = mi.GetMethodBody()?.GetILAsByteArray();
-          if (il is null)
-          {
-            continue;
-          }
-
-          var hash = string.Concat(sha1.ComputeHash(il).Select(x => x.ToString("X2")));
-          var fullName = mi.DeclaringType.FullName + "." + mi.Name;
-          if (!methodMap.ContainsKey(hash))
-          {
-            Console.WriteLine($"      {fullName}");
-            methodMap.Add(hash, fullName);
-          }
-          else
-          {
-            Console.WriteLine($"      ***{fullName}");
-          }
+          ProcessMethod(mi, methodMap);
         }
       }
     }
@@ -138,4 +112,31 @@ public sealed class Analyser
 
     Solution = await workspace.OpenSolutionAsync(solnFilePath, progress, cancellationToken);
   }
+
+  private void ProcessMethod(MethodBase mb, Dictionary<string, string> methodMap)
+  {
+    var il = mb.GetMethodBody()?.GetILAsByteArray();
+    if (il is null)
+    {
+      return;
+    }
+
+    var hash = string.Concat(_sha1.ComputeHash(il).Select(x => x.ToString("X2")));
+    var fullName = mb.DeclaringType.FullName + "." + mb.Name;
+    if (!methodMap.ContainsKey(hash))
+    {
+      Console.WriteLine($"      {fullName}");
+      methodMap.Add(hash, fullName);
+    }
+    else
+    {
+      Console.WriteLine($"      ***{fullName} <--> {methodMap[hash]}");
+    }
+  }
+
+  public void Dispose()
+  {
+    _sha1.Dispose();
+  }
 }
+
