@@ -18,8 +18,6 @@ public sealed class Analyser
 
   public Solution Solution { get; private set; }
 
-  private readonly string _solnFilePath;
-
   public static async Task<Analyser> Create(
     string solnFilePath,
     IProgress<ProjectLoadProgress> progress = null,
@@ -30,17 +28,23 @@ public sealed class Analyser
       throw new FileNotFoundException($"Could not find {solnFilePath}");
     }
 
-    var retval = new Analyser(solnFilePath);
-    await retval.LoadSolution(progress, cancellationToken);
+    var retval = new Analyser();
+    await retval.LoadSolution(solnFilePath, progress, cancellationToken);
 
     return retval;
   }
 
   public async Task Analyse()
   {
-    // TODO   Analyse
+    var solnName = Path.GetFileNameWithoutExtension(Solution.FilePath);
+    Console.WriteLine($"{solnName}");
+
     ProjectDependencyGraph projectGraph = Solution.GetProjectDependencyGraph();
     Dictionary<string, Stream> assemblies = new Dictionary<string, Stream>();
+
+    // create dictionary:
+    //    [hash-il-method] --> [fq-method-name]
+    var methodMap = new Dictionary<string, string>();
 
     foreach (ProjectId projectId in projectGraph.GetTopologicallySortedProjects())
     {
@@ -50,36 +54,75 @@ public sealed class Analyser
       var result = projectCompilation.Emit(dll, pdb);
       var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
 
-      // TODO   create dictionary:
-      //    [hash-il-method] --> [fq-method-name]
-      var methodMap = new Dictionary<string, string>();
+      var projPath = Solution.GetProject(projectId);
+      var projName = Path.GetFileNameWithoutExtension(projPath.FilePath);
+      Console.WriteLine($"  {projName}");
 
+      const BindingFlags flags =
+        BindingFlags.Default |
+        BindingFlags.IgnoreCase |
+        BindingFlags.DeclaredOnly |
+        BindingFlags.Instance |
+        BindingFlags.Static |
+        BindingFlags.Public |
+        BindingFlags.NonPublic |
+        BindingFlags.FlattenHierarchy;
       using var sha1 = SHA1.Create();
       foreach (var type in assy.GetTypes())
       {
-        foreach (var mi in type.GetMethods())
+        Console.WriteLine($"    {type.Name}");
+
+        foreach(var ci in type.GetConstructors(flags))
+        {
+          var il = ci.GetMethodBody()?.GetILAsByteArray();
+          var hash = string.Concat(sha1.ComputeHash(il).Select(x => x.ToString("X2")));
+          var fullName = ci.DeclaringType.FullName + "." + ci.Name;
+          if (!methodMap.ContainsKey(hash))
+          {
+            Console.WriteLine($"      {fullName}");
+            methodMap.Add(hash, fullName);
+          }
+          else
+          {
+            Console.WriteLine($"      ***{fullName}");
+          }
+        }
+
+        foreach (var mi in type.GetMethods(flags))
         {
           var il = mi.GetMethodBody()?.GetILAsByteArray();
+          if (il is null)
+          {
+            continue;
+          }
+
           var hash = string.Concat(sha1.ComputeHash(il).Select(x => x.ToString("X2")));
-          var name = mi.GetType().AssemblyQualifiedName;
-          methodMap.Add(hash, name);
+          var fullName = mi.DeclaringType.FullName + "." + mi.Name;
+          if (!methodMap.ContainsKey(hash))
+          {
+            Console.WriteLine($"      {fullName}");
+            methodMap.Add(hash, fullName);
+          }
+          else
+          {
+            Console.WriteLine($"      ***{fullName}");
+          }
         }
       }
     }
   }
 
-  private Analyser(string solnFilePath)
+  private Analyser()
   {
     if (!MSBuildLocator.IsRegistered)
     {
       var instances = MSBuildLocator.QueryVisualStudioInstances().ToArray();
       MSBuildLocator.RegisterInstance(instances.OrderByDescending(x => x.Version).First());
     }
-
-    _solnFilePath = solnFilePath;
   }
 
   private async Task LoadSolution(
+    string solnFilePath,
     IProgress<ProjectLoadProgress> progress = null,
     CancellationToken cancellationToken = default)
   {
@@ -93,6 +136,6 @@ public sealed class Analyser
       }
     };
 
-    Solution = await workspace.OpenSolutionAsync(_solnFilePath, progress, cancellationToken);
+    Solution = await workspace.OpenSolutionAsync(solnFilePath, progress, cancellationToken);
   }
 }

@@ -14,7 +14,6 @@ internal static class Program
 
   private static async Task Run(Options opt)
   {
-    Console.WriteLine($"Analysing {opt.SolutionFilePath}");
     var anal = await AnalyserFactory.CreateAnalyser(opt.SolutionFilePath);
     await anal.Analyse();
   }
