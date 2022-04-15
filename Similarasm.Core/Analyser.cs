@@ -51,14 +51,20 @@ public sealed class Analyser : IDisposable
     foreach (var projectId in projectGraph.GetTopologicallySortedProjects())
     {
       var proj = Solution.GetProject(projectId);
+      var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
+      Console.WriteLine($"  {projName}");
+
       var projComp = await proj.GetCompilationAsync();
       using var dll = new MemoryStream();
       using var pdb = new MemoryStream();
       var result = projComp.Emit(dll, pdb);
-      var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
+      if (!result.Success)
+      {
+        Console.WriteLine($"    Failed to emit: {projName}");
+        continue;
+      }
 
-      var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
-      Console.WriteLine($"  {projName}");
+      var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
 
       const BindingFlags flags =
         BindingFlags.Default |
@@ -69,19 +75,26 @@ public sealed class Analyser : IDisposable
         BindingFlags.Public |
         BindingFlags.NonPublic |
         BindingFlags.FlattenHierarchy;
-      foreach (var type in assy.GetTypes())
+      try
       {
-        Console.WriteLine($"    {type.Name}");
-
-        foreach (var ci in type.GetConstructors(flags))
+        foreach (var type in assy.GetTypes())
         {
-          ProcessMethod(proj, ci, methodMap);
-        }
+          Console.WriteLine($"    {type.Name}");
 
-        foreach (var mi in type.GetMethods(flags))
-        {
-          ProcessMethod(proj, mi, methodMap);
+          foreach (var ci in type.GetConstructors(flags))
+          {
+            ProcessMethod(proj, ci, methodMap);
+          }
+
+          foreach (var mi in type.GetMethods(flags))
+          {
+            ProcessMethod(proj, mi, methodMap);
+          }
         }
+      }
+      catch (Exception e)
+      {
+        Console.WriteLine($"    {e.Message}");
       }
     }
   }
@@ -140,4 +153,3 @@ public sealed class Analyser : IDisposable
     _sha1.Dispose();
   }
 }
-
