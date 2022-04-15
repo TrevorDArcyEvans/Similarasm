@@ -1,5 +1,6 @@
 ﻿namespace Similarasm.UI.CLI;
 
+using System.Diagnostics;
 using CommandLine;
 using Core;
 
@@ -14,8 +15,12 @@ internal static class Program
 
   private static async Task Run(Options opt)
   {
+    var sw = Stopwatch.StartNew();
+
     var anal = await AnalyserFactory.CreateAnalyser(opt.SolutionFilePath);
     await anal.Analyse();
+
+    Console.WriteLine($"Elapsed time: {sw.ElapsedMilliseconds} ms");
   }
 
   private static Task HandleParseError(IEnumerable<Error> errs)
