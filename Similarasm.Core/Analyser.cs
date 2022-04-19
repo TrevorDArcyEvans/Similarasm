@@ -11,6 +11,8 @@ using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using System.Security.Cryptography;
+using System.Runtime.Loader;
+using System.Xml;
 
 public sealed class Analyser : IDisposable
 {
@@ -38,6 +40,30 @@ public sealed class Analyser : IDisposable
 
   public async Task Analyse()
   {
+    // THIS IS THE MAGIC!
+    // .NET Core assembly loading is confusing. Things that happen to be in your bin folder don't just suddenly
+    // qualify with the assembly loader. If the assembly isn't specifically referenced by your app, you need to
+    // tell .NET Core where to get it EVEN IF IT'S IN YOUR BIN FOLDER.
+    // https://stackoverflow.com/questions/43918837/net-core-1-1-type-gettype-from-external-assembly-returns-null
+    //
+    // The documentation says that any .dll in the application base folder should work, but that doesn't seem
+    // to be entirely true. You always have to set up additional handlers if you AREN'T referencing the plugin assembly.
+    // https://github.com/dotnet/core-setup/blob/master/Documentation/design-docs/corehost.md
+    //
+    // To verify, try commenting this out and you'll see that the config system can't load the external plugin type.
+    AssemblyLoadContext.Default.Resolving += (AssemblyLoadContext context, AssemblyName assembly) =>
+    {
+      // DISCLAIMER: NO PROMISES THIS IS SECURE. You may or may not want this strategy. It's up to
+      // you to determine if allowing any assembly in the directory to be loaded is acceptable. This
+      // is for demo purposes only.
+      var assyPath = Assembly.GetExecutingAssembly().Location;
+      var assyDir = Path.GetDirectoryName(assyPath);
+
+      Console.WriteLine($"Trying to load {assembly.Name}");
+
+      return context.LoadFromAssemblyPath(Path.Combine(assyDir, $"{assembly.Name}.dll"));
+    };
+
     var solnName = Path.GetFileNameWithoutExtension(Solution.FilePath);
     Console.WriteLine($"{solnName}");
 
@@ -53,6 +79,15 @@ public sealed class Analyser : IDisposable
       var proj = Solution.GetProject(projectId);
       var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
       Console.WriteLine($"  {projName}");
+
+
+      foreach (var mdr in proj.MetadataReferences)
+      {
+        Console.WriteLine($"mdr --> {mdr.Display}");
+      }
+
+      NugetPackages(proj);
+
 
       var projComp = await proj.GetCompilationAsync();
       using var dll = new MemoryStream();
@@ -148,6 +183,18 @@ public sealed class Analyser : IDisposable
     }
   }
 
+  private void NugetPackages(Project project)
+  {
+    var csproj = new XmlDocument();
+    csproj.Load(project.FilePath);
+    var nodes = csproj.SelectNodes("//PackageReference[@Include and @Version]");
+    foreach (XmlNode packageReference in nodes)
+    {
+      var packageName = packageReference.Attributes["Include"].Value;
+      var packageVersion = Version.Parse(packageReference.Attributes["Version"].Value);
+      Console.WriteLine($"Pkg: {packageName}:{packageVersion}");
+    }
+  }
   public void Dispose()
   {
     _sha1.Dispose();
