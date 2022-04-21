@@ -40,6 +40,8 @@ public sealed class Analyser : IDisposable
 
   public async Task Analyse()
   {
+    var assemblies = new Dictionary<string, Assembly>();
+
     // THIS IS THE MAGIC!
     // .NET Core assembly loading is confusing. Things that happen to be in your bin folder don't just suddenly
     // qualify with the assembly loader. If the assembly isn't specifically referenced by your app, you need to
@@ -59,16 +61,30 @@ public sealed class Analyser : IDisposable
       var assyPath = Assembly.GetExecutingAssembly().Location;
       var assyDir = Path.GetDirectoryName(assyPath);
 
-      Console.WriteLine($"Trying to load {assembly.Name}");
+      Console.WriteLine($"Trying to load {assembly.FullName}");
+      if (assemblies.ContainsKey(assembly.Name))
+      {
+        Console.WriteLine("  loaded from cache");
+        return assemblies[assembly.Name];
+      }
 
-      return context.LoadFromAssemblyPath(Path.Combine(assyDir, $"{assembly.Name}.dll"));
+      var missAssyPath = Path.Combine(assyDir, $"{assembly.Name}.dll");
+      if (File.Exists(missAssyPath))
+      {
+        var missAssy = context.LoadFromAssemblyPath(missAssyPath);
+        assemblies.Add(assembly.Name, missAssy);
+        return missAssy;
+      }
+      
+      // TODO   look in local nuget cache
+
+      return null;
     };
 
     var solnName = Path.GetFileNameWithoutExtension(Solution.FilePath);
     Console.WriteLine($"{solnName}");
 
-    ProjectDependencyGraph projectGraph = Solution.GetProjectDependencyGraph();
-    Dictionary<string, Stream> assemblies = new Dictionary<string, Stream>();
+    var projectGraph = Solution.GetProjectDependencyGraph();
 
     // create dictionary:
     //    [hash-il-method] --> [fq-method-name]
@@ -83,15 +99,15 @@ public sealed class Analyser : IDisposable
 
       foreach (var mdr in proj.MetadataReferences)
       {
-        Console.WriteLine($"mdr --> {mdr.Display}");
+        //Console.WriteLine($"mdr --> {mdr.Display}");
       }
 
       NugetPackages(proj);
 
 
       var projComp = await proj.GetCompilationAsync();
-      using var dll = new MemoryStream();
-      using var pdb = new MemoryStream();
+      await using var dll = new MemoryStream();
+      await using var pdb = new MemoryStream();
       var result = projComp.Emit(dll, pdb);
       if (!result.Success)
       {
@@ -100,6 +116,7 @@ public sealed class Analyser : IDisposable
       }
 
       var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
+      assemblies.Add(projName, assy);
 
       const BindingFlags flags =
         BindingFlags.Default |
@@ -150,7 +167,7 @@ public sealed class Analyser : IDisposable
   {
     var workspace = MSBuildWorkspace.Create();
     workspace.SkipUnrecognizedProjects = true;
-    workspace.WorkspaceFailed += (sender, args) =>
+    workspace.WorkspaceFailed += (_, args) =>
     {
       if (args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
       {
@@ -191,10 +208,11 @@ public sealed class Analyser : IDisposable
     foreach (XmlNode packageReference in nodes)
     {
       var packageName = packageReference.Attributes["Include"].Value;
-      var packageVersion = Version.Parse(packageReference.Attributes["Version"].Value);
-      Console.WriteLine($"Pkg: {packageName}:{packageVersion}");
+      var packageVersion = packageReference.Attributes["Version"].Value;
+      //Console.WriteLine($"Pkg: {packageName}:{packageVersion}");
     }
   }
+
   public void Dispose()
   {
     _sha1.Dispose();
