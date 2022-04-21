@@ -96,15 +96,6 @@ public sealed class Analyser : IDisposable
       var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
       Console.WriteLine($"  {projName}");
 
-
-      foreach (var mdr in proj.MetadataReferences)
-      {
-        //Console.WriteLine($"mdr --> {mdr.Display}");
-      }
-
-      NugetPackages(proj);
-
-
       var projComp = await proj.GetCompilationAsync();
       await using var dll = new MemoryStream();
       await using var pdb = new MemoryStream();
@@ -197,19 +188,6 @@ public sealed class Analyser : IDisposable
     else
     {
       Console.WriteLine($"      ***{fullName} <--> {methodMap[hash]}");
-    }
-  }
-
-  private void NugetPackages(Project project)
-  {
-    var csproj = new XmlDocument();
-    csproj.Load(project.FilePath);
-    var nodes = csproj.SelectNodes("//PackageReference[@Include and @Version]");
-    foreach (XmlNode packageReference in nodes)
-    {
-      var packageName = packageReference.Attributes["Include"].Value;
-      var packageVersion = packageReference.Attributes["Version"].Value;
-      //Console.WriteLine($"Pkg: {packageName}:{packageVersion}");
     }
   }
 
