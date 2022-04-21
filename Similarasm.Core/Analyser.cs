@@ -1,11 +1,10 @@
-﻿using NuGet.Frameworks;
-
-namespace Similarasm.Core;
+﻿namespace Similarasm.Core;
 
 using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
 using NuGet.Configuration;
+using NuGet.Frameworks;
 using NuGet.Packaging;
 using NuGet.Packaging.Core;
 using System;
@@ -28,6 +27,8 @@ public sealed class Analyser : IDisposable
   public Solution Solution { get; private set; }
 
   private readonly SHA1 _sha1 = SHA1.Create();
+  private readonly Dictionary<string, Assembly> assemblies = new();
+  private string currentTargetFrameworkMoniker = string.Empty;
 
   public static async Task<Analyser> Create(
     string solnFilePath,
@@ -47,9 +48,6 @@ public sealed class Analyser : IDisposable
 
   public async Task Analyse()
   {
-    var assemblies = new Dictionary<string, Assembly>();
-    var currentTargetFrameworkMoniker = string.Empty;
-
     // THIS IS THE MAGIC!
     // .NET Core assembly loading is confusing. Things that happen to be in your bin folder don't just suddenly
     // qualify with the assembly loader. If the assembly isn't specifically referenced by your app, you need to
@@ -61,78 +59,9 @@ public sealed class Analyser : IDisposable
     // https://github.com/dotnet/core-setup/blob/master/Documentation/design-docs/corehost.md
     //
     // To verify, try commenting this out and you'll see that the config system can't load the external plugin type.
-    AssemblyLoadContext.Default.Resolving += (AssemblyLoadContext context, AssemblyName assembly) =>
-    {
-      // DISCLAIMER: NO PROMISES THIS IS SECURE. You may or may not want this strategy. It's up to
-      // you to determine if allowing any assembly in the directory to be loaded is acceptable. This
-      // is for demo purposes only.
-      var assyPath = Assembly.GetExecutingAssembly().Location;
-      var assyDir = Path.GetDirectoryName(assyPath);
+    AssemblyLoadContext.Default.Resolving += OnResolving;
 
-      if (assemblies.ContainsKey(assembly.Name))
-      {
-        return assemblies[assembly.Name];
-      }
-
-      var missAssyPath = Path.Combine(assyDir, $"{assembly.Name}.dll");
-      if (File.Exists(missAssyPath))
-      {
-        var missAssy = context.LoadFromAssemblyPath(missAssyPath);
-        assemblies.Add(assembly.Name, missAssy);
-        return missAssy;
-      }
-
-      // look in local nuget cache
-      var target = assembly.Name.ToLowerInvariant();
-      var settings = Settings.LoadDefaultSettings(null);
-
-      // /home/trevorde/.nuget/packages/
-      var globPackDir = SettingsUtility.GetGlobalPackagesFolder(settings);
-      var nuspecDir = Path.Combine(globPackDir, target);
-      if (!Directory.Exists(nuspecDir))
-      {
-        // no folder for some Microsoft components eg
-        //    Microsoft.AspNetCore.Razor.SourceGenerator.Tooling.Internal
-        return null;
-      }
-
-      var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir);
-      var nuspecVerDir = nuspecVerDirs.Single(dir =>
-      {
-        var nuspecVerVer = new Version(Path.GetFileName(dir));
-        return
-          assembly.Version.Major == nuspecVerVer.Major &&
-          assembly.Version.Minor == nuspecVerVer.Minor &&
-          assembly.Version.Build == nuspecVerVer.Build;
-      });
-      var nuspecVer = Path.GetFileName(nuspecVerDir);
-      var archiveFilePath = Path.Combine(nuspecVerDir, $"{target}.{nuspecVer}{PackagingCoreConstants.NupkgExtension}");
-      var isPkg = PackageHelper.IsPackageFile(archiveFilePath, PackageSaveMode.Defaultv3);
-      var par = new PackageArchiveReader(archiveFilePath);
-      var fwSpecGrps = par.GetLibItems();
-      var fwAssyMap = fwSpecGrps.ToDictionary(
-        fwspg => GetTargetFrameworkMoniker(fwspg.TargetFramework),
-        fwspg => fwspg.Items.Single(item => PackageHelper.IsAssembly(item)));
-
-      // since TFMs are ordered, search backward from latest TFM to get most up to date assy
-      // which is compatible with current project target framework
-      var currTFMGroup = GetTargetFrameworkMonikerGroup(currentTargetFrameworkMoniker);
-      var currTFMGroupIdx = currTFMGroup.IndexOf(currentTargetFrameworkMoniker);
-      for (var i = currTFMGroupIdx; i >= 0; i--)
-      {
-        var entry = currTFMGroup[i];
-        if (!fwAssyMap.ContainsKey(entry))
-        {
-          continue;
-        }
-
-        var reqAssyPath = Path.Combine(nuspecVerDir, fwAssyMap[entry]);
-        var reqAssy = Assembly.LoadFile(reqAssyPath);
-        return reqAssy;
-      }
-
-      return null;
-    };
+    assemblies.Clear();
 
     var solnName = Path.GetFileNameWithoutExtension(Solution.FilePath);
     Console.WriteLine($"{solnName}");
@@ -223,6 +152,79 @@ public sealed class Analyser : IDisposable
     };
 
     Solution = await workspace.OpenSolutionAsync(solnFilePath, progress, cancellationToken);
+  }
+
+  private Assembly OnResolving(AssemblyLoadContext context, AssemblyName assembly)
+  {
+    // DISCLAIMER: NO PROMISES THIS IS SECURE. You may or may not want this strategy. It's up to
+    // you to determine if allowing any assembly in the directory to be loaded is acceptable. This
+    // is for demo purposes only.
+    var assyPath = Assembly.GetExecutingAssembly().Location;
+    var assyDir = Path.GetDirectoryName(assyPath);
+
+    if (assemblies.ContainsKey(assembly.Name))
+    {
+      return assemblies[assembly.Name];
+    }
+
+    var missAssyPath = Path.Combine(assyDir, $"{assembly.Name}.dll");
+    if (File.Exists(missAssyPath))
+    {
+      var missAssy = context.LoadFromAssemblyPath(missAssyPath);
+      assemblies.Add(assembly.Name, missAssy);
+      return missAssy;
+    }
+
+    // look in local nuget cache
+    var target = assembly.Name.ToLowerInvariant();
+    var settings = Settings.LoadDefaultSettings(null);
+
+    // /home/trevorde/.nuget/packages/
+    var globPackDir = SettingsUtility.GetGlobalPackagesFolder(settings);
+    var nuspecDir = Path.Combine(globPackDir, target);
+    if (!Directory.Exists(nuspecDir))
+    {
+      // no folder for some Microsoft components eg
+      //    Microsoft.AspNetCore.Razor.SourceGenerator.Tooling.Internal
+      return null;
+    }
+
+    var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir);
+    var nuspecVerDir = nuspecVerDirs.Single(dir =>
+    {
+      var nuspecVerVer = new Version(Path.GetFileName(dir));
+      return
+        assembly.Version.Major == nuspecVerVer.Major &&
+        assembly.Version.Minor == nuspecVerVer.Minor &&
+        assembly.Version.Build == nuspecVerVer.Build;
+    });
+    var nuspecVer = Path.GetFileName(nuspecVerDir);
+    var archiveFilePath = Path.Combine(nuspecVerDir, $"{target}.{nuspecVer}{PackagingCoreConstants.NupkgExtension}");
+    var isPkg = PackageHelper.IsPackageFile(archiveFilePath, PackageSaveMode.Defaultv3);
+    var par = new PackageArchiveReader(archiveFilePath);
+    var fwSpecGrps = par.GetLibItems();
+    var fwAssyMap = fwSpecGrps.ToDictionary(
+      fwspg => GetTargetFrameworkMoniker(fwspg.TargetFramework),
+      fwspg => fwspg.Items.Single(item => PackageHelper.IsAssembly(item)));
+
+    // since TFMs are ordered, search backward from latest TFM to get most up to date assy
+    // which is compatible with current project target framework
+    var currTFMGroup = GetTargetFrameworkMonikerGroup(currentTargetFrameworkMoniker);
+    var currTFMGroupIdx = currTFMGroup.IndexOf(currentTargetFrameworkMoniker);
+    for (var i = currTFMGroupIdx; i >= 0; i--)
+    {
+      var entry = currTFMGroup[i];
+      if (!fwAssyMap.ContainsKey(entry))
+      {
+        continue;
+      }
+
+      var reqAssyPath = Path.Combine(nuspecVerDir, fwAssyMap[entry]);
+      var reqAssy = Assembly.LoadFile(reqAssyPath);
+      return reqAssy;
+    }
+
+    return null;
   }
 
   private void ProcessMethod(Project proj, MethodBase mb, Dictionary<string, string> methodMap)
