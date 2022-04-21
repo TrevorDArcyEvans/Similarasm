@@ -194,11 +194,16 @@ public sealed class Analyser : IDisposable
     var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir);
     var nuspecVerDir = nuspecVerDirs.Single(dir =>
     {
-      var nuspecVerVer = new Version(Path.GetFileName(dir));
-      return
-        assembly.Version.Major == nuspecVerVer.Major &&
-        assembly.Version.Minor == nuspecVerVer.Minor &&
-        assembly.Version.Build == nuspecVerVer.Build;
+      // can get some directory names which are not strictly versions eg
+      //    3.1.0-preview3.19555.2
+      if (Version.TryParse(Path.GetFileName(dir), out var nuspecVerVer))
+      {
+        return
+          assembly.Version.Major == nuspecVerVer.Major &&
+          assembly.Version.Minor == nuspecVerVer.Minor &&
+          assembly.Version.Build == nuspecVerVer.Build;
+      }
+      return false;
     });
     var nuspecVer = Path.GetFileName(nuspecVerDir);
     var archiveFilePath = Path.Combine(nuspecVerDir, $"{target}.{nuspecVer}{PackagingCoreConstants.NupkgExtension}");
