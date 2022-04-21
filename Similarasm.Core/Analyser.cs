@@ -1,5 +1,9 @@
 ﻿namespace Similarasm.Core;
 
+using NuGet.Configuration;
+using NuGet.Frameworks;
+using NuGet.Packaging;
+using NuGet.Packaging.Core;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,7 +16,6 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using System.Security.Cryptography;
 using System.Runtime.Loader;
-using System.Xml;
 
 public sealed class Analyser : IDisposable
 {
@@ -75,8 +78,40 @@ public sealed class Analyser : IDisposable
         assemblies.Add(assembly.Name, missAssy);
         return missAssy;
       }
-      
+
+
       // TODO   look in local nuget cache
+      Console.WriteLine("-------------------------");
+      Console.WriteLine($" {assembly.Name} : {assembly.Version}");
+      Console.WriteLine("-------------------------");
+      
+      var target = assembly.Name.ToLowerInvariant();
+      var settings = Settings.LoadDefaultSettings(null);
+
+      // /home/trevorde/.nuget/packages/
+      var globPackDir = SettingsUtility.GetGlobalPackagesFolder(settings);
+      Console.WriteLine($"GlobalPackagesFolder = {globPackDir}");
+      Console.WriteLine("-------------------------");
+
+      var nuspecDir = Path.Combine(globPackDir, target);
+      var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir);
+      foreach (var nuspecVerDir in nuspecVerDirs)
+      {
+        var nuspecFilePath = Path.Combine(nuspecVerDir, $"{target}{PackagingCoreConstants.NuspecExtension}");
+        var nuspecPath = Path.Combine(globPackDir, target, nuspecVerDir, nuspecFilePath);
+        var nuspecRdr = new NuspecReader(nuspecPath);
+        var isSpec = PackageHelper.IsNuspec(nuspecPath);
+        Console.WriteLine($"{nuspecPath} --> {isSpec}");
+
+        var nuspecVer = Path.GetFileName(nuspecVerDir);
+        var archiveFilePath = Path.Combine(nuspecVerDir, $"{target}.{nuspecVer}{PackagingCoreConstants.NupkgExtension}");
+        var isPkg = PackageHelper.IsPackageFile(archiveFilePath, PackageSaveMode.Defaultv3);
+        Console.WriteLine($"{archiveFilePath} --> {isPkg}");
+        var par = new PackageArchiveReader(archiveFilePath);
+        Dump(par.GetLibItems());
+        Console.WriteLine();
+      }
+
 
       return null;
     };
@@ -189,6 +224,24 @@ public sealed class Analyser : IDisposable
     {
       Console.WriteLine($"      ***{fullName} <--> {methodMap[hash]}");
     }
+  }
+
+  private static void Dump(IEnumerable<FrameworkSpecificGroup> groups)
+  {
+    foreach (var grp in groups)
+    {
+      Console.WriteLine($"  {grp.TargetFramework}");
+      foreach (var item in grp.Items)
+      {
+        var isAssy = PackageHelper.IsAssembly(item);
+        Console.WriteLine($"    {item} --> {isAssy}");
+      }
+    }
+  }
+
+  private static void Dump(NuGetFramework ngf)
+  {
+    Console.WriteLine($"  {ngf.Framework} : {ngf.Version.ToString()}");
   }
 
   public void Dispose()
