@@ -1,7 +1,11 @@
-﻿namespace Similarasm.Core;
+﻿using NuGet.Frameworks;
 
+namespace Similarasm.Core;
+
+using System.Globalization;
+using System.Text;
+using System.Xml.Linq;
 using NuGet.Configuration;
-using NuGet.Frameworks;
 using NuGet.Packaging;
 using NuGet.Packaging.Core;
 using System;
@@ -44,6 +48,7 @@ public sealed class Analyser : IDisposable
   public async Task Analyse()
   {
     var assemblies = new Dictionary<string, Assembly>();
+    var currentTargetFrameworkMoniker = string.Empty;
 
     // THIS IS THE MAGIC!
     // .NET Core assembly loading is confusing. Things that happen to be in your bin folder don't just suddenly
@@ -74,44 +79,62 @@ public sealed class Analyser : IDisposable
       var missAssyPath = Path.Combine(assyDir, $"{assembly.Name}.dll");
       if (File.Exists(missAssyPath))
       {
+        Console.WriteLine("  loaded from disk");
         var missAssy = context.LoadFromAssemblyPath(missAssyPath);
         assemblies.Add(assembly.Name, missAssy);
         return missAssy;
       }
 
-
-      // TODO   look in local nuget cache
-      Console.WriteLine("-------------------------");
-      Console.WriteLine($" {assembly.Name} : {assembly.Version}");
-      Console.WriteLine("-------------------------");
-      
+      // look in local nuget cache
       var target = assembly.Name.ToLowerInvariant();
       var settings = Settings.LoadDefaultSettings(null);
 
       // /home/trevorde/.nuget/packages/
       var globPackDir = SettingsUtility.GetGlobalPackagesFolder(settings);
-      Console.WriteLine($"GlobalPackagesFolder = {globPackDir}");
-      Console.WriteLine("-------------------------");
-
       var nuspecDir = Path.Combine(globPackDir, target);
-      var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir);
-      foreach (var nuspecVerDir in nuspecVerDirs)
+      if (!Directory.Exists(nuspecDir))
       {
-        var nuspecFilePath = Path.Combine(nuspecVerDir, $"{target}{PackagingCoreConstants.NuspecExtension}");
-        var nuspecPath = Path.Combine(globPackDir, target, nuspecVerDir, nuspecFilePath);
-        var nuspecRdr = new NuspecReader(nuspecPath);
-        var isSpec = PackageHelper.IsNuspec(nuspecPath);
-        Console.WriteLine($"{nuspecPath} --> {isSpec}");
-
-        var nuspecVer = Path.GetFileName(nuspecVerDir);
-        var archiveFilePath = Path.Combine(nuspecVerDir, $"{target}.{nuspecVer}{PackagingCoreConstants.NupkgExtension}");
-        var isPkg = PackageHelper.IsPackageFile(archiveFilePath, PackageSaveMode.Defaultv3);
-        Console.WriteLine($"{archiveFilePath} --> {isPkg}");
-        var par = new PackageArchiveReader(archiveFilePath);
-        Dump(par.GetLibItems());
-        Console.WriteLine();
+        // no folder for some Microsoft components eg
+        //    Microsoft.AspNetCore.Razor.SourceGenerator.Tooling.Internal
+        Console.WriteLine("  not in local nuget cache");
+        return null;
       }
 
+      var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir);
+      var nuspecVerDir = nuspecVerDirs.Single(dir =>
+      {
+        var nuspecVerVer = new Version(Path.GetFileName(dir));
+        return
+          assembly.Version.Major == nuspecVerVer.Major &&
+          assembly.Version.Minor == nuspecVerVer.Minor &&
+          assembly.Version.Build == nuspecVerVer.Build;
+      });
+      var nuspecVer = Path.GetFileName(nuspecVerDir);
+      var archiveFilePath = Path.Combine(nuspecVerDir, $"{target}.{nuspecVer}{PackagingCoreConstants.NupkgExtension}");
+      var isPkg = PackageHelper.IsPackageFile(archiveFilePath, PackageSaveMode.Defaultv3);
+      var par = new PackageArchiveReader(archiveFilePath);
+      var fwSpecGrps = par.GetLibItems();
+      var fwAssyMap = fwSpecGrps.ToDictionary(
+        fwspg => GetTargetFrameworkMoniker(fwspg.TargetFramework),
+        fwspg => fwspg.Items.Single(item => PackageHelper.IsAssembly(item)));
+
+      // since TFMs are ordered, search backward from latest TFM to get most up to date assy
+      // which is compatible with current project target framework
+      var currTFMGroup = GetTargetFrameworkMonikerGroup(currentTargetFrameworkMoniker);
+      var currTFMGroupIdx = currTFMGroup.IndexOf(currentTargetFrameworkMoniker);
+      for (var i = currTFMGroupIdx; i >= 0; i--)
+      {
+        var entry = currTFMGroup[i];
+        if (!fwAssyMap.ContainsKey(entry))
+        {
+          continue;
+        }
+
+        Console.WriteLine("  loaded from local nuget cache");
+        var reqAssyPath = Path.Combine(nuspecVerDir, fwAssyMap[entry]);
+        var reqAssy = Assembly.LoadFile(reqAssyPath);
+        return reqAssy;
+      }
 
       return null;
     };
@@ -130,6 +153,15 @@ public sealed class Analyser : IDisposable
       var proj = Solution.GetProject(projectId);
       var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
       Console.WriteLine($"  {projName}");
+
+
+      var xmldoc = XDocument.Load(proj.FilePath);
+      foreach (var tgtFW in xmldoc.Descendants("TargetFramework"))
+      {
+        currentTargetFrameworkMoniker = tgtFW.Value;
+        Console.WriteLine($"    TargetFramework: {currentTargetFrameworkMoniker}");
+      }
+
 
       var projComp = await proj.GetCompilationAsync();
       await using var dll = new MemoryStream();
@@ -226,22 +258,120 @@ public sealed class Analyser : IDisposable
     }
   }
 
-  private static void Dump(IEnumerable<FrameworkSpecificGroup> groups)
+  private static string GetTargetFrameworkMoniker(NuGetFramework fwk)
   {
-    foreach (var grp in groups)
+    var framework = GetDisplayVersion(fwk);
+    var version = GetDisplayVersion(fwk.Version);
+    if (framework == "net")
     {
-      Console.WriteLine($"  {grp.TargetFramework}");
-      foreach (var item in grp.Items)
-      {
-        var isAssy = PackageHelper.IsAssembly(item);
-        Console.WriteLine($"    {item} --> {isAssy}");
-      }
+      version = version.Replace(".", "");
     }
+
+    return $"{framework}{version}";
   }
 
-  private static void Dump(NuGetFramework ngf)
+  private static string GetDisplayVersion(NuGetFramework fwk)
   {
-    Console.WriteLine($"  {ngf.Framework} : {ngf.Version.ToString()}");
+    // .NETFramework --> net
+    var retval = fwk.Framework
+      .ToLowerInvariant()
+      .Replace(".", "")
+      .Replace("netframework", "net");
+
+    return retval;
+  }
+
+  private static string GetDisplayVersion(Version version)
+  {
+    var sb = new StringBuilder(string.Format(CultureInfo.InvariantCulture, "{0}.{1}", version.Major, version.Minor));
+
+    if (version.Build > 0 ||
+        version.Revision > 0)
+    {
+      sb.AppendFormat(CultureInfo.InvariantCulture, ".{0}", version.Build);
+
+      if (version.Revision > 0)
+      {
+        sb.AppendFormat(CultureInfo.InvariantCulture, ".{0}", version.Revision);
+      }
+    }
+
+    return sb.ToString();
+  }
+
+  /// <summary>
+  /// returns an ordered list of Target Framework Monikers,
+  /// ordered by release date from earliest to latest
+  /// </summary>
+  /// <param name="tfm"></param>
+  /// <returns>ordered list of Target Framework Monikers</returns>
+  /// <exception cref="ArgumentOutOfRangeException"></exception>
+  private static IReadOnlyList<string> GetTargetFrameworkMonikerGroup(string tfm)
+  {
+    // stolen from:
+    //    https://docs.microsoft.com/en-us/dotnet/standard/frameworks
+
+    // .NET 5+ (and .NET Core)
+    var netCore = new[]
+    {
+      "netcoreapp1.0",
+      "netcoreapp1.1",
+      "netcoreapp2.0",
+      "netcoreapp2.1",
+      "netcoreapp2.2",
+      "netcoreapp3.0",
+      "netcoreapp3.1",
+      "net5.0",
+      "net6.0"
+    };
+    if (netCore.Contains(tfm))
+    {
+      return netCore.ToList();
+    }
+
+    // .NET Standard
+    var netStd = new[]
+    {
+      "netstandard1.0",
+      "netstandard1.1",
+      "netstandard1.2",
+      "netstandard1.3",
+      "netstandard1.4",
+      "netstandard1.5",
+      "netstandard1.6",
+      "netstandard2.0",
+      "netstandard2.1"
+    };
+    if (netStd.Contains(tfm))
+    {
+      return netStd.ToList();
+    }
+
+    // .NET Framework
+    var netFramework = new[]
+    {
+      "net11",
+      "net20",
+      "net35",
+      "net40",
+      "net403",
+      "net45",
+      "net451",
+      "net452",
+      "net46",
+      "net461",
+      "net462",
+      "net47",
+      "net471",
+      "net472",
+      "net48"
+    };
+    if (netFramework.Contains(tfm))
+    {
+      return netFramework.ToList();
+    }
+
+    throw new ArgumentOutOfRangeException($"Unknown TargetFrameworkMoniker: {tfm}");
   }
 
   public void Dispose()
