@@ -24,7 +24,7 @@ public sealed class Analyser : IDisposable
 {
   public static Version Version { get; } = new Version(0, 1);
 
-  public Solution Solution { get; private set; }
+  private Solution _solution;
 
   private readonly SHA1 _sha1 = SHA1.Create();
   private readonly Dictionary<string, Assembly> _assemblies = new();
@@ -63,10 +63,10 @@ public sealed class Analyser : IDisposable
 
     _assemblies.Clear();
 
-    var solnName = Path.GetFileNameWithoutExtension(Solution.FilePath);
+    var solnName = Path.GetFileNameWithoutExtension(_solution.FilePath);
     Console.WriteLine($"{solnName}");
 
-    var projectGraph = Solution.GetProjectDependencyGraph();
+    var projectGraph = _solution.GetProjectDependencyGraph();
 
     // create dictionary:
     //    [hash-il-method] --> [fq-method-name]
@@ -74,10 +74,11 @@ public sealed class Analyser : IDisposable
 
     foreach (var projectId in projectGraph.GetTopologicallySortedProjects())
     {
-      var proj = Solution.GetProject(projectId);
+      var proj = _solution.GetProject(projectId);
       var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
       Console.WriteLine($"  {projName}");
 
+      // TODO   support TargetFrameworks ie multiple
       var xmldoc = XDocument.Load(proj.FilePath);
       _currentTargetFrameworkMoniker = xmldoc.Descendants("TargetFramework").Single().Value;
 
@@ -151,7 +152,7 @@ public sealed class Analyser : IDisposable
       }
     };
 
-    Solution = await workspace.OpenSolutionAsync(solnFilePath, progress, cancellationToken);
+    _solution = await workspace.OpenSolutionAsync(solnFilePath, progress, cancellationToken);
   }
 
   private Assembly OnResolving(AssemblyLoadContext context, AssemblyName assembly)
