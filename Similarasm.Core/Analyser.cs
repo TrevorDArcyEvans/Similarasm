@@ -27,8 +27,8 @@ public sealed class Analyser : IDisposable
   public Solution Solution { get; private set; }
 
   private readonly SHA1 _sha1 = SHA1.Create();
-  private readonly Dictionary<string, Assembly> assemblies = new();
-  private string currentTargetFrameworkMoniker = string.Empty;
+  private readonly Dictionary<string, Assembly> _assemblies = new();
+  private string _currentTargetFrameworkMoniker = string.Empty;
 
   public static async Task<Analyser> Create(
     string solnFilePath,
@@ -61,7 +61,7 @@ public sealed class Analyser : IDisposable
     // To verify, try commenting this out and you'll see that the config system can't load the external plugin type.
     AssemblyLoadContext.Default.Resolving += OnResolving;
 
-    assemblies.Clear();
+    _assemblies.Clear();
 
     var solnName = Path.GetFileNameWithoutExtension(Solution.FilePath);
     Console.WriteLine($"{solnName}");
@@ -79,7 +79,7 @@ public sealed class Analyser : IDisposable
       Console.WriteLine($"  {projName}");
 
       var xmldoc = XDocument.Load(proj.FilePath);
-      currentTargetFrameworkMoniker = xmldoc.Descendants("TargetFramework").Single().Value;
+      _currentTargetFrameworkMoniker = xmldoc.Descendants("TargetFramework").Single().Value;
 
       var projComp = await proj.GetCompilationAsync();
       await using var dll = new MemoryStream();
@@ -92,7 +92,7 @@ public sealed class Analyser : IDisposable
       }
 
       var assy = Assembly.Load(dll.ToArray(), pdb.ToArray());
-      assemblies.Add(projName, assy);
+      _assemblies.Add(projName, assy);
 
       const BindingFlags flags =
         BindingFlags.Default |
@@ -162,16 +162,16 @@ public sealed class Analyser : IDisposable
     var assyPath = Assembly.GetExecutingAssembly().Location;
     var assyDir = Path.GetDirectoryName(assyPath);
 
-    if (assemblies.ContainsKey(assembly.Name))
+    if (_assemblies.ContainsKey(assembly.Name))
     {
-      return assemblies[assembly.Name];
+      return _assemblies[assembly.Name];
     }
 
     var missAssyPath = Path.Combine(assyDir, $"{assembly.Name}.dll");
     if (File.Exists(missAssyPath))
     {
       var missAssy = context.LoadFromAssemblyPath(missAssyPath);
-      assemblies.Add(assembly.Name, missAssy);
+      _assemblies.Add(assembly.Name, missAssy);
       return missAssy;
     }
 
@@ -209,8 +209,8 @@ public sealed class Analyser : IDisposable
 
     // since TFMs are ordered, search backward from latest TFM to get most up to date assy
     // which is compatible with current project target framework
-    var currTFMGroup = GetTargetFrameworkMonikerGroup(currentTargetFrameworkMoniker);
-    var currTFMGroupIdx = currTFMGroup.IndexOf(currentTargetFrameworkMoniker);
+    var currTFMGroup = GetTargetFrameworkMonikerGroup(_currentTargetFrameworkMoniker);
+    var currTFMGroupIdx = currTFMGroup.IndexOf(_currentTargetFrameworkMoniker);
     for (var i = currTFMGroupIdx; i >= 0; i--)
     {
       var entry = currTFMGroup[i];
