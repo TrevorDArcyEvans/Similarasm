@@ -187,6 +187,7 @@ public sealed class Analyser : IDisposable
     {
       // no folder for some Microsoft components eg
       //    Microsoft.AspNetCore.Razor.SourceGenerator.Tooling.Internal
+      _assemblies.Add(assembly.Name, null);
       return null;
     }
 
@@ -222,9 +223,11 @@ public sealed class Analyser : IDisposable
 
       var reqAssyPath = Path.Combine(nuspecVerDir, fwAssyMap[entry]);
       var reqAssy = Assembly.LoadFile(reqAssyPath);
+      _assemblies.Add(assembly.Name, reqAssy);
       return reqAssy;
     }
 
+    _assemblies.Add(assembly.Name, null);
     return null;
   }
 
