@@ -69,17 +69,14 @@ public sealed class Analyser : IDisposable
       var assyPath = Assembly.GetExecutingAssembly().Location;
       var assyDir = Path.GetDirectoryName(assyPath);
 
-      Console.WriteLine($"Trying to load {assembly.FullName}");
       if (assemblies.ContainsKey(assembly.Name))
       {
-        Console.WriteLine("  loaded from cache");
         return assemblies[assembly.Name];
       }
 
       var missAssyPath = Path.Combine(assyDir, $"{assembly.Name}.dll");
       if (File.Exists(missAssyPath))
       {
-        Console.WriteLine("  loaded from disk");
         var missAssy = context.LoadFromAssemblyPath(missAssyPath);
         assemblies.Add(assembly.Name, missAssy);
         return missAssy;
@@ -96,7 +93,6 @@ public sealed class Analyser : IDisposable
       {
         // no folder for some Microsoft components eg
         //    Microsoft.AspNetCore.Razor.SourceGenerator.Tooling.Internal
-        Console.WriteLine("  not in local nuget cache");
         return null;
       }
 
@@ -130,7 +126,6 @@ public sealed class Analyser : IDisposable
           continue;
         }
 
-        Console.WriteLine("  loaded from local nuget cache");
         var reqAssyPath = Path.Combine(nuspecVerDir, fwAssyMap[entry]);
         var reqAssy = Assembly.LoadFile(reqAssyPath);
         return reqAssy;
@@ -154,14 +149,8 @@ public sealed class Analyser : IDisposable
       var projName = Path.GetFileNameWithoutExtension(proj.FilePath);
       Console.WriteLine($"  {projName}");
 
-
       var xmldoc = XDocument.Load(proj.FilePath);
-      foreach (var tgtFW in xmldoc.Descendants("TargetFramework"))
-      {
-        currentTargetFrameworkMoniker = tgtFW.Value;
-        Console.WriteLine($"    TargetFramework: {currentTargetFrameworkMoniker}");
-      }
-
+      currentTargetFrameworkMoniker = xmldoc.Descendants("TargetFramework").Single().Value;
 
       var projComp = await proj.GetCompilationAsync();
       await using var dll = new MemoryStream();
