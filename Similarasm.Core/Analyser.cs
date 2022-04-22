@@ -267,7 +267,24 @@ public sealed class Analyser : IDisposable
       version = version.Replace(".", "");
     }
 
-    return $"{framework}{version}";
+    var retval = $"{framework}{version}";
+
+    // START_HACK
+    // Some components (Microsoft.AspNetCore.Components) have their framework as '.NETCoreApp'
+    // We map here rather than in GetDisplayVersion so we only map exact matches rather
+    // than all frameworks with '.NETCoreApp' eg '.NETCoreApp3.0'
+    switch (retval)
+    {
+      case "netcoreapp5.0":
+        retval = "net5.0";
+        break;
+      case "netcoreapp6.0":
+        retval = "net6.0";
+        break;
+    }
+    // END_HACK
+
+    return retval;
   }
 
   private static string GetDisplayVersion(NuGetFramework fwk)
