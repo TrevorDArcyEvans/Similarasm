@@ -223,7 +223,7 @@ public sealed class Analyser : IDisposable
 
     // since TFMs are ordered, search backward from latest TFM to get most up to date assy
     // which is compatible with current project target framework
-    var currTFMGroup = GetTargetFrameworkMonikerGroup(_currentTargetFrameworkMoniker);
+    var currTFMGroup = GetTargetFrameworkMonikerCompatibilityGroup(_currentTargetFrameworkMoniker);
     var currTFMGroupIdx = currTFMGroup.IndexOf(_currentTargetFrameworkMoniker);
     for (var i = currTFMGroupIdx; i >= 0; i--)
     {
@@ -324,20 +324,32 @@ public sealed class Analyser : IDisposable
   }
 
   /// <summary>
-  /// returns an ordered list of Target Framework Monikers,
+  /// returns an ordered list of Target Framework Monikers
+  /// which are compatible with the input Target Framework Moniker,
   /// ordered by release date from earliest to latest
   /// </summary>
   /// <param name="tfm"></param>
   /// <returns>ordered list of Target Framework Monikers</returns>
   /// <exception cref="ArgumentOutOfRangeException"></exception>
-  private static IReadOnlyList<string> GetTargetFrameworkMonikerGroup(string tfm)
+  private static IReadOnlyList<string> GetTargetFrameworkMonikerCompatibilityGroup(string tfm)
   {
     // stolen from:
     //    https://docs.microsoft.com/en-us/dotnet/standard/frameworks
 
-    // .NET 5+ (and .NET Core)
-    var netCore = new[]
+    var netCoreStd = new[]
     {
+      // .NET Standard
+      "netstandard1.0",
+      "netstandard1.1",
+      "netstandard1.2",
+      "netstandard1.3",
+      "netstandard1.4",
+      "netstandard1.5",
+      "netstandard1.6",
+      "netstandard2.0",
+      "netstandard2.1",
+
+      // .NET 5+ (and .NET Core)
       "netcoreapp1.0",
       "netcoreapp1.1",
       "netcoreapp2.0",
@@ -348,27 +360,9 @@ public sealed class Analyser : IDisposable
       "net5.0",
       "net6.0"
     };
-    if (netCore.Contains(tfm))
+    if (netCoreStd.Contains(tfm))
     {
-      return netCore.ToList();
-    }
-
-    // .NET Standard
-    var netStd = new[]
-    {
-      "netstandard1.0",
-      "netstandard1.1",
-      "netstandard1.2",
-      "netstandard1.3",
-      "netstandard1.4",
-      "netstandard1.5",
-      "netstandard1.6",
-      "netstandard2.0",
-      "netstandard2.1"
-    };
-    if (netStd.Contains(tfm))
-    {
-      return netStd.ToList();
+      return netCoreStd.ToList();
     }
 
     // .NET Framework
