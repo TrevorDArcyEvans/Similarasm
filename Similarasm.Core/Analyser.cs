@@ -256,7 +256,6 @@ public sealed class Analyser : IDisposable
     var fullName = $"{projName}:{mb.DeclaringType.FullName}.{mb.Name}";
     if (!methodMap.ContainsKey(hash))
     {
-      Console.WriteLine($"      {fullName}");
       methodMap.Add(hash, fullName);
     }
     else
