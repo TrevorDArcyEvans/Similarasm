@@ -191,10 +191,16 @@ public sealed class Analyser : IDisposable
       return null;
     }
 
-    var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir);
-    var nuspecVerDir = nuspecVerDirs.Single(dir =>
+    // Force ordering from lowest to highest rather than relying on OS file globbing
+    var nuspecVerDirs = Directory.EnumerateDirectories(nuspecDir)
+      .OrderBy(x => x.ToLowerInvariant());
+
+    // Others packages have only a single directory eg
+    //    Blazored.Modal/7.0.0-preiew.2
+    // Note that we if we can't find a match, we default to the latest (Last)
+    var nuspecVerDir = nuspecVerDirs.SingleOrDefault(dir =>
     {
-      // can get some directory names which are not strictly versions eg
+      // Can get some directory names which are not strictly versions eg
       //    3.1.0-preview3.19555.2
       if (Version.TryParse(Path.GetFileName(dir), out var nuspecVerVer))
       {
@@ -204,7 +210,8 @@ public sealed class Analyser : IDisposable
           assembly.Version.Build == nuspecVerVer.Build;
       }
       return false;
-    });
+    }) ?? nuspecVerDirs.Last();
+
     var nuspecVer = Path.GetFileName(nuspecVerDir);
     var archiveFilePath = Path.Combine(nuspecVerDir, $"{target}.{nuspecVer}{PackagingCoreConstants.NupkgExtension}");
     var isPkg = PackageHelper.IsPackageFile(archiveFilePath, PackageSaveMode.Defaultv3);
