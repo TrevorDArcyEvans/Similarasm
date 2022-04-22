@@ -7,8 +7,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Similarasm.Core", "Similara
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Similarasm.UI.CLI", "Similarasm.UI.CLI\Similarasm.UI.CLI.csproj", "{577C2E76-57A1-46EC-943D-347665592A53}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Similarasm.Core.Tests", "Similarasm.Core.Tests\Similarasm.Core.Tests.csproj", "{775C5208-9076-4767-876A-967246E618DB}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,9 +24,5 @@ Global
 		{577C2E76-57A1-46EC-943D-347665592A53}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{577C2E76-57A1-46EC-943D-347665592A53}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{577C2E76-57A1-46EC-943D-347665592A53}.Release|Any CPU.Build.0 = Release|Any CPU
-		{775C5208-9076-4767-876A-967246E618DB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{775C5208-9076-4767-876A-967246E618DB}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{775C5208-9076-4767-876A-967246E618DB}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{775C5208-9076-4767-876A-967246E618DB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
